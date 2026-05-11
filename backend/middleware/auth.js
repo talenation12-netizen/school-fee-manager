@@ -19,4 +19,24 @@ function authMiddleware(req, res, next) {
   }
 }
 
-module.exports = authMiddleware;
+module.exports = (req, res, next) => {
+  const header = req.headers.authorization;
+
+  if (!header) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
+  try {
+    // SIMPLE VERSION (upgrade later to JWT verify)
+    const token = header.replace("Bearer ", "");
+
+    if (token !== "secure-token-abc") {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    req.schoolId = "SCHOOL_001";
+    next();
+  } catch (err) {
+    res.status(401).json({ error: "Auth failed" });
+  }
+};
