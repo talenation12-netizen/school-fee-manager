@@ -5,11 +5,12 @@ const auth = require("../middleware/auth");
 const router = express.Router();
 
 /**
- * GET ALL PAYMENTS (for Excel dashboard)
+ * GET ALL PAYMENTS (Excel dashboard)
+ * Multi-school safe
  */
 router.get("/", auth, async (req, res) => {
   try {
-    const schoolId = req.schoolId;
+    const schoolId = req.school.schoolId;
 
     const result = await pool.query(
       `
@@ -21,6 +22,7 @@ router.get("/", auth, async (req, res) => {
     );
 
     res.json(result.rows);
+
   } catch (err) {
     console.error("GET PAYMENTS ERROR:", err);
 

@@ -4,18 +4,27 @@ const auth = require("../middleware/auth");
 
 const router = express.Router();
 
+/**
+ * CREATE PAYMENT EVENT (SECURE)
+ * Multi-school safe write
+ */
 router.post("/", auth, async (req, res) => {
   try {
-    const event = req.body;
-    const schoolId = req.schoolId;
+    const { event_type, payload } = req.body;
 
-    console.log("EVENT RECEIVED:", event);
-    console.log("AUTH SCHOOL:", schoolId);
+    const schoolId = req.school.schoolId; // 🔐 TRUST SERVER ONLY
 
-    if (event.event_type === "PAYMENT_ADDED") {
-      const { amount, method, reference } = event.payload;
+    // basic validation
+    if (!event_type || !payload) {
+      return res.status(400).json({
+        error: "Missing event_type or payload"
+      });
+    }
 
-      await pool.query(
+    if (event_type === "PAYMENT_ADDED") {
+      const { amount, method, reference } = payload;
+
+      const result = await pool.query(
         `
         INSERT INTO payments (
           school_id,
@@ -24,22 +33,28 @@ router.post("/", auth, async (req, res) => {
           reference
         )
         VALUES ($1, $2, $3, $4)
-        ON CONFLICT (reference) DO NOTHING
+        RETURNING *
         `,
         [schoolId, amount, method, reference]
       );
+
+      return res.json({
+        status: "ACKNOWLEDGED",
+        data: result.rows[0]
+      });
     }
 
-    return res.json({
-      status: "ACKNOWLEDGED",
-      schoolId
+    // fallback for unknown events
+    return res.status(400).json({
+      error: "Unknown event type"
     });
-  } catch (error) {
-    console.error("EVENT ERROR:", error);
 
-    return res.status(500).json({
+  } catch (err) {
+    console.error("EVENT ERROR:", err);
+
+    res.status(500).json({
       error: "Internal Server Error",
-      details: error.message
+      details: err.message
     });
   }
 });

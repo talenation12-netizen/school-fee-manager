@@ -1,22 +1,12 @@
 const express = require("express");
 const cors = require("cors");
-const pool = require("./db");
-const { PORT } = require("./config");
 
 const app = express();
 
-app.use(cors({
-  origin: "http://localhost:5173"
-}));
-
+app.use(cors());
 app.use(express.json());
 
-// routes
-app.use("/api/auth", require("./routes/auth"));
-app.use("/api/events", require("./routes/events"));
-app.use("/api/payments", require("./routes/payments"));
-
-// health check
+// HEALTH CHECK (ROOT)
 app.get("/", (req, res) => {
   res.json({
     ok: true,
@@ -24,22 +14,21 @@ app.get("/", (req, res) => {
   });
 });
 
-// DB init
-async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS payments (
-      id SERIAL PRIMARY KEY,
-      school_id TEXT,
-      amount INT,
-      method TEXT,
-      reference TEXT UNIQUE,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-}
-
-initDB().then(() => {
-  app.listen(PORT, () => {
-    console.log("🚀 SaaS backend running on port", PORT);
+// ADD THIS (IMPORTANT)
+app.get("/api", (req, res) => {
+  res.json({
+    ok: true,
+    message: "API working"
   });
+});
+
+// ROUTES (CRITICAL)
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/payments", require("./routes/payments"));
+app.use("/api/events", require("./routes/events"));
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
