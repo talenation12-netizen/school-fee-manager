@@ -5,25 +5,16 @@ const auth = require("../middleware/auth");
 const router = express.Router();
 
 /**
- * GET all fee structures
+ * GET fee structures
  */
 router.get("/", auth, async (req, res) => {
   try {
-    const schoolId = req.user.schoolId;
-
     const result = await pool.query(
-      `
-      SELECT *
-      FROM fee_structures
-      WHERE school_id = $1
-      ORDER BY created_at DESC
-      `,
-      [schoolId]
+      "SELECT * FROM fee_structures WHERE school_id = $1 ORDER BY created_at DESC",
+      [req.user.schoolId]
     );
 
-    res.json({
-      feeStructures: result.rows
-    });
+    res.json({ feeStructures: result.rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch fee structures" });
@@ -35,8 +26,6 @@ router.get("/", auth, async (req, res) => {
  */
 router.post("/", auth, async (req, res) => {
   try {
-    const schoolId = req.user.schoolId;
-
     const {
       academic_year,
       term,
@@ -45,37 +34,29 @@ router.post("/", auth, async (req, res) => {
       amount
     } = req.body;
 
-    if (
-      !academic_year ||
-      !term ||
-      !class_name ||
-      !description ||
-      amount === undefined
-    ) {
+    if (!academic_year || !term || !class_name || !description) {
       return res.status(400).json({
-        error: "All fields are required"
+        error: "Missing required fields"
       });
     }
 
     const result = await pool.query(
-      `
-      INSERT INTO fee_structures
+      `INSERT INTO fee_structures
       (school_id, academic_year, term, class_name, description, amount)
       VALUES ($1,$2,$3,$4,$5,$6)
-      RETURNING *
-      `,
+      RETURNING *`,
       [
-        schoolId,
+        req.user.schoolId,
         academic_year,
         term,
         class_name,
         description,
-        amount
+        amount || 0
       ]
     );
 
     res.json({
-      message: "Fee structure created",
+      message: "Created successfully",
       feeStructure: result.rows[0]
     });
   } catch (err) {

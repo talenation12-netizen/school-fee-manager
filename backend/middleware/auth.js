@@ -1,12 +1,13 @@
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key_change_this";
+const JWT_SECRET =
+  process.env.JWT_SECRET || "super_secret_key_change_this";
 
 module.exports = function auth(req, res, next) {
   try {
     const header = req.headers.authorization;
 
-    if (!header || !header.startsWith("Bearer ")) {
+    if (!header) {
       return res.status(401).json({ error: "No token provided" });
     }
 
@@ -19,7 +20,7 @@ module.exports = function auth(req, res, next) {
     next();
   } catch (err) {
     return res.status(401).json({
-      error: "Session expired. Please login again."
+      error: "Invalid or expired token"
     });
   }
 };
