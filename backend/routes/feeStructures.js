@@ -6,7 +6,6 @@ const router = express.Router();
 
 /**
  * GET /api/fee-structures
- * List all fee structures for the logged-in school
  */
 router.get("/", auth, async (req, res) => {
   try {
@@ -35,7 +34,6 @@ router.get("/", auth, async (req, res) => {
 
 /**
  * POST /api/fee-structures
- * Create a new fee structure item
  */
 router.post("/", auth, async (req, res) => {
   try {
