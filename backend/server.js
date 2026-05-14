@@ -3,11 +3,16 @@ const cors = require("cors");
 
 const app = express();
 
+const reportsRoutes = require('./routes/reports');
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/api/reports', reportsRoutes);
 
-// Health check
+// =====================
+// HEALTH CHECK ROUTES
+// =====================
 app.get("/", (req, res) => {
   res.json({
     ok: true,
@@ -22,30 +27,48 @@ app.get("/api", (req, res) => {
   });
 });
 
-// Routes (SAFE LOAD ONLY)
-try {
-  app.use("/api/auth", require("./routes/auth"));
-  app.use("/api/students", require("./routes/students"));
-  app.use("/api/payments", require("./routes/payments"));
-  app.use("/api/reports", require("./routes/reports"));
-  app.use("/api/receipts", require("./routes/receipts"));
-  app.use("/api/events", require("./routes/events"));
-} catch (err) {
-  console.error("ROUTE LOAD ERROR:", err);
-}
+// =====================
+// SAFE ROUTE LOADER
+// =====================
+const loadRoute = (path, routePath) => {
+  try {
+    const route = require(routePath);
+    app.use(path, route);
+    console.log(`✅ Loaded route: ${path}`);
+  } catch (err) {
+    console.error(`❌ Failed to load route ${path}`);
+    console.error(err.message);
+  }
+};
 
-// 404
+// =====================
+// REGISTER ROUTES
+// =====================
+loadRoute("/api/auth", "./routes/auth");
+loadRoute("/api/students", "./routes/students");
+loadRoute("/api/payments", "./routes/payments");
+loadRoute("/api/reports", "./routes/reports");
+loadRoute("/api/receipts", "./routes/receipts");
+loadRoute("/api/events", "./routes/events");
+
+// =====================
+// 404 HANDLER
+// =====================
 app.use((req, res) => {
   if (req.path.startsWith("/api")) {
     return res.status(404).json({
       error: "API route not found"
     });
   }
+
+  res.status(200).send("Server running");
 });
 
-// IMPORTANT FOR RENDER
+// =====================
+// START SERVER
+// =====================
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`🚀 Server running on port ${PORT}`);
 });

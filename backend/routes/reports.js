@@ -1,31 +1,23 @@
-router.get("/summary", auth, async (req, res) => {
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+
+router.get('/dashboard', auth, async (req, res) => {
   try {
-    const schoolId = req.school.schoolId;
-
-    const payments = await pool.query(
-      `
-      SELECT SUM(amount) as total_collected
-      FROM payments
-      WHERE school_id = $1
-      `,
-      [schoolId]
-    );
-
-    const students = await pool.query(
-      `
-      SELECT COUNT(*) as total_students
-      FROM students
-      WHERE school_id = $1
-      `,
-      [schoolId]
-    );
-
+    // Placeholder values for initial frontend testing
     res.json({
-      total_collected: payments.rows[0].total_collected || 0,
-      total_students: students.rows[0].total_students || 0
+      totalStudents: 1200,
+      totalCollected: 450000,
+      totalOutstanding: 120000,
+      transactions: 3400,
+      avgPayment: 1323
     });
-
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load report" });
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    res.status(500).json({
+      error: 'Failed to load dashboard'
+    });
   }
 });
+
+module.exports = router;
