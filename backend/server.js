@@ -35,8 +35,12 @@ try {
 }
 
 // 404
-app.use("/api/*", (req, res) => {
-  res.status(404).json({ error: "API route not found" });
+app.use((req, res) => {
+  if (req.path.startsWith("/api")) {
+    return res.status(404).json({
+      error: "API route not found"
+    });
+  }
 });
 
 // IMPORTANT FOR RENDER
