@@ -5,8 +5,7 @@ const auth = require("../middleware/auth");
 const router = express.Router();
 
 /**
- * GET ALL PAYMENTS (Excel dashboard)
- * Multi-school safe
+ * GET ALL PAYMENTS
  */
 router.get("/", auth, async (req, res) => {
   try {
@@ -22,14 +21,32 @@ router.get("/", auth, async (req, res) => {
     );
 
     res.json(result.rows);
-
   } catch (err) {
-    console.error("GET PAYMENTS ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch payments" });
+  }
+});
 
-    res.status(500).json({
-      error: "Failed to fetch payments",
-      details: err.message
-    });
+/**
+ * CREATE PAYMENT
+ */
+router.post("/", auth, async (req, res) => {
+  try {
+    const schoolId = req.school.schoolId;
+    const { student_name, amount, method, reference } = req.body;
+
+    const result = await pool.query(
+      `
+      INSERT INTO payments
+      (school_id, student_name, amount, method, reference)
+      VALUES ($1,$2,$3,$4,$5)
+      RETURNING *
+      `,
+      [schoolId, student_name, amount, method, reference]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create payment" });
   }
 });
 

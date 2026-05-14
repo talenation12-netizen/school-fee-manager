@@ -3,10 +3,11 @@ const cors = require("cors");
 
 const app = express();
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// HEALTH CHECK (ROOT)
+// Root health check
 app.get("/", (req, res) => {
   res.json({
     ok: true,
@@ -14,7 +15,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// ADD THIS (IMPORTANT)
+// API health check
 app.get("/api", (req, res) => {
   res.json({
     ok: true,
@@ -22,13 +23,24 @@ app.get("/api", (req, res) => {
   });
 });
 
-// ROUTES (CRITICAL)
+// API Routes
 app.use("/api/auth", require("./routes/auth"));
+app.use("/api/students", require("./routes/students"));
 app.use("/api/payments", require("./routes/payments"));
+app.use("/api/receipts", require("./routes/receipts"));
 app.use("/api/events", require("./routes/events"));
+app.use("/api/reports", require("./routes/reports"));
+app.use("/api/fee-structures", require("./routes/feeStructures"));
+
+// 404 handler for unknown API routes
+app.use("/api/*", (req, res) => {
+  res.status(404).json({
+    error: "API route not found"
+  });
+});
 
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`Server running on port ${PORT}`);
 });
