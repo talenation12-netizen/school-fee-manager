@@ -30,8 +30,9 @@ app.use("/api/payments", require("./routes/payments"));
 app.use("/api/receipts", require("./routes/receipts"));
 app.use("/api/events", require("./routes/events"));
 app.use("/api/reports", require("./routes/reports"));
-app.use("/api/fee-structures", require("./routes/feeStructures"));
-
+app.use("/api/fee-structures", (req, res) => {
+  res.json({ ok: true });
+});
 // 404 handler for unknown API routes
 app.use("/api/*", (req, res) => {
   res.status(404).json({
