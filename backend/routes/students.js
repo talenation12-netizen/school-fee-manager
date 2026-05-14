@@ -1,104 +1,67 @@
 const express = require("express");
-const pool = require("../db");
-const auth = require("../middleware/auth");
-
 const router = express.Router();
+const auth = require("../middleware/auth");
+const pool = require("../db"); // your PostgreSQL connection
 
-/**
- * GET ALL STUDENTS (PER SCHOOL)
- */
-router.get("/", auth, async (req, res) => {
+// ===============================
+// GET STUDENT LEDGER (CORE ENGINE)
+// ===============================
+router.get("/:id/ledger", auth, async (req, res) => {
   try {
-    const schoolId = req.school.schoolId;
+    const studentId = req.params.id;
+    const schoolId = req.user.school_id;
 
-    const result = await pool.query(
-      `
-      SELECT * FROM students
-      WHERE school_id = $1
-      ORDER BY id DESC
-      `,
-      [schoolId]
+    // 1. Get student
+    const studentResult = await pool.query(
+      `SELECT * FROM students 
+       WHERE id = $1 AND school_id = $2`,
+      [studentId, schoolId]
     );
 
-    res.json(result.rows);
-  } catch (err) {
-    console.error("GET STUDENTS ERROR:", err);
-    res.status(500).json({ error: "Failed to fetch students" });
-  }
-});
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ error: "Student not found" });
+    }
 
-/**
- * CREATE STUDENT
- */
-router.post("/create", auth, async (req, res) => {
-  try {
-    const schoolId = req.school.schoolId;
-    const { name, class: className, fee_expected, paid } = req.body;
+    const student = studentResult.rows[0];
 
-    const result = await pool.query(
-      `
-      INSERT INTO students (school_id, name, class, fee_expected, paid)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-      `,
-      [schoolId, name, className, fee_expected || 0, paid || 0]
+    // 2. Get total payments
+    const paymentResult = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total_paid
+       FROM payments
+       WHERE student_id = $1 AND school_id = $2`,
+      [studentId, schoolId]
     );
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("CREATE STUDENT ERROR:", err);
-    res.status(500).json({ error: "Failed to create student" });
-  }
-});
+    const totalPaid = parseFloat(paymentResult.rows[0].total_paid);
 
-/**
- * UPDATE STUDENT (EXCEL STYLE EDIT)
- */
-router.post("/update", auth, async (req, res) => {
-  try {
-    const schoolId = req.school.schoolId;
-    const { id, name, class: className, fee_expected, paid } = req.body;
+    // 3. Compute ledger values
+    const expectedFees = parseFloat(student.expected_fees || 0);
+    const balance = expectedFees - totalPaid;
 
-    const result = await pool.query(
-      `
-      UPDATE students
-      SET name = $1,
-          class = $2,
-          fee_expected = $3,
-          paid = $4
-      WHERE id = $5 AND school_id = $6
-      RETURNING *
-      `,
-      [name, className, fee_expected, paid, id, schoolId]
-    );
+    let status = "PAID";
+    if (balance > 0) status = "OWING";
+    if (balance < 0) status = "OVERPAID";
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("UPDATE STUDENT ERROR:", err);
-    res.status(500).json({ error: "Failed to update student" });
-  }
-});
+    // 4. Response
+    res.json({
+      student: {
+        id: student.id,
+        name: student.name,
+        admission_number: student.admission_number,
+        class: student.class,
+        expected_fees: expectedFees
+      },
+      financials: {
+        expectedFees,
+        totalPaid,
+        balance,
+        status
+      }
+    });
 
-/**
- * DELETE STUDENT (OPTIONAL BUT READY)
- */
-router.delete("/:id", auth, async (req, res) => {
-  try {
-    const schoolId = req.school.schoolId;
-    const { id } = req.params;
-
-    await pool.query(
-      `
-      DELETE FROM students
-      WHERE id = $1 AND school_id = $2
-      `,
-      [id, schoolId]
-    );
-
-    res.json({ message: "Deleted" });
-  } catch (err) {
-    console.error("DELETE STUDENT ERROR:", err);
-    res.status(500).json({ error: "Failed to delete student" });
+  } catch (error) {
+    console.error("Ledger error:", error);
+    res.status(500).json({ error: "Failed to load ledger" });
   }
 });
 
