@@ -5,7 +5,7 @@ const auth = require("../middleware/auth");
 const router = express.Router();
 
 /**
- * GET /api/fee-structures
+ * GET all fee structures
  */
 router.get("/", auth, async (req, res) => {
   try {
@@ -16,7 +16,7 @@ router.get("/", auth, async (req, res) => {
       SELECT *
       FROM fee_structures
       WHERE school_id = $1
-      ORDER BY academic_year DESC, term, class_name, description
+      ORDER BY created_at DESC
       `,
       [schoolId]
     );
@@ -25,15 +25,13 @@ router.get("/", auth, async (req, res) => {
       feeStructures: result.rows
     });
   } catch (err) {
-    console.error("FEE STRUCTURES GET ERROR:", err);
-    res.status(500).json({
-      error: "Failed to load fee structures"
-    });
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch fee structures" });
   }
 });
 
 /**
- * POST /api/fee-structures
+ * CREATE fee structure
  */
 router.post("/", auth, async (req, res) => {
   try {
@@ -62,15 +60,8 @@ router.post("/", auth, async (req, res) => {
     const result = await pool.query(
       `
       INSERT INTO fee_structures
-      (
-        school_id,
-        academic_year,
-        term,
-        class_name,
-        description,
-        amount
-      )
-      VALUES ($1, $2, $3, $4, $5, $6)
+      (school_id, academic_year, term, class_name, description, amount)
+      VALUES ($1,$2,$3,$4,$5,$6)
       RETURNING *
       `,
       [
@@ -88,10 +79,8 @@ router.post("/", auth, async (req, res) => {
       feeStructure: result.rows[0]
     });
   } catch (err) {
-    console.error("FEE STRUCTURES POST ERROR:", err);
-    res.status(500).json({
-      error: "Failed to create fee structure"
-    });
+    console.error(err);
+    res.status(500).json({ error: "Failed to create fee structure" });
   }
 });
 
