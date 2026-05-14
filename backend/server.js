@@ -1,47 +1,47 @@
 const express = require("express");
-const pool = require("./db");
-const auth = require("./middleware/auth");
+const cors = require("cors");
 
-const router = express.Router();
+const app = express();
 
-router.get("/", auth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM fee_structures WHERE school_id = $1",
-      [req.user.schoolId]
-    );
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-    res.json({ feeStructures: result.rows });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "failed" });
-  }
+// Health check
+app.get("/", (req, res) => {
+  res.json({
+    ok: true,
+    message: "School Fee Manager API running"
+  });
 });
 
-router.post("/", auth, async (req, res) => {
-  try {
-    const { academic_year, term, class_name, description, amount } = req.body;
-
-    const result = await pool.query(
-      `INSERT INTO fee_structures
-      (school_id, academic_year, term, class_name, description, amount)
-      VALUES ($1,$2,$3,$4,$5,$6)
-      RETURNING *`,
-      [
-        req.user.schoolId,
-        academic_year,
-        term,
-        class_name,
-        description,
-        amount
-      ]
-    );
-
-    res.json({ feeStructure: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "failed" });
-  }
+app.get("/api", (req, res) => {
+  res.json({
+    ok: true,
+    message: "API working"
+  });
 });
 
-module.exports = router;
+// Routes (SAFE LOAD ONLY)
+try {
+  app.use("/api/auth", require("./routes/auth"));
+  app.use("/api/students", require("./routes/students"));
+  app.use("/api/payments", require("./routes/payments"));
+  app.use("/api/reports", require("./routes/reports"));
+  app.use("/api/receipts", require("./routes/receipts"));
+  app.use("/api/events", require("./routes/events"));
+} catch (err) {
+  console.error("ROUTE LOAD ERROR:", err);
+}
+
+// 404
+app.use("/api/*", (req, res) => {
+  res.status(404).json({ error: "API route not found" });
+});
+
+// IMPORTANT FOR RENDER
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
