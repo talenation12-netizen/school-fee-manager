@@ -6,7 +6,7 @@ const pool = require("../db");
 const router = express.Router();
 
 const JWT_SECRET =
-  process.env.JWT_SECRET || "super_secret_key_change_this";
+  process.env.JWT_SECRET || "xx_32_ds_fd_se_ef_xfe_ser_drws_fde_come_to_my_10999_tyo_trep";
 
 /**
  * GET /api/auth/me
