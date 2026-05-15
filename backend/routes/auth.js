@@ -184,3 +184,43 @@ router.post("/login", async (req, res) => {
 });
 
 module.exports = router;
+
+
+// const express = require('express');
+// const jwt = require('jsonwebtoken');
+// const router = express.Router();
+
+// // Example login route
+// router.post('/login', async (req, res) => {
+//   const { email, password } = req.body;
+
+//   // Replace with your real user lookup and password check
+//   if (email !== 'admin@test.com' || password !== '123456') {
+//     return res.status(401).json({
+//       error: 'Invalid credentials',
+//     });
+//   }
+
+//   const school = {
+//     school_id: 'test_school',
+//     school_name: 'Test School',
+//     email: 'admin@test.com',
+//   };
+
+//   const token = jwt.sign(
+//     {
+//       school_id: school.school_id,
+//     },
+//     process.env.JWT_SECRET,
+//     {
+//       expiresIn: '7d',
+//     }
+//   );
+
+//   res.json({
+//     token,
+//     school,
+//   });
+// });
+
+// module.exports = router;
