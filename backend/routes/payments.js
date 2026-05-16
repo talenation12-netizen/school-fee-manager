@@ -1,18 +1,53 @@
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth");
 const pool = require("../db");
+const auth = require("../middleware/Auth");
 
 // ===============================
-// CREATE PAYMENT (CORE ENGINE)
+// ALLOCATION ENGINE
+// ===============================
+function allocatePayment(amount) {
+  const rules = {
+    tuition: 0.6,
+    transport: 0.15,
+    meals: 0.1,
+    boarding: 0.1,
+    development: 0.05,
+  };
+
+  const allocation = {};
+
+  for (const key in rules) {
+    allocation[key] = parseFloat((amount * rules[key]).toFixed(2));
+  }
+
+  return allocation;
+}
+
+// ===============================
+// POST PAYMENT (CORE ENGINE)
 // ===============================
 router.post("/", auth, async (req, res) => {
+  const client = await pool.connect();
+
   try {
-    const { student_id, amount, payment_method, notes } = req.body;
+    await client.query("BEGIN");
 
-    const school_id = req.user.schoolId;
+    const {
+      student_id,
+      amount,
+      payment_method = "Cash",
+      category = "Tuition",
+      term = "Term 1",
+      academic_year = "2026",
+      notes = "",
+    } = req.body;
 
-    // 1. Validate input
+    const schoolId = req.user.schoolId;
+
+    // ===============================
+    // VALIDATION
+    // ===============================
     if (!student_id || !amount) {
       return res.status(400).json({
         error: "student_id and amount are required",
@@ -25,83 +60,137 @@ router.post("/", auth, async (req, res) => {
       });
     }
 
-    // 2. Check student exists for this school
-    const studentResult = await pool.query(
-      `SELECT * FROM students 
-       WHERE id = $1 AND school_id = $2`,
-      [student_id, school_id]
+    // ===============================
+    // GET STUDENT
+    // ===============================
+    const studentResult = await client.query(
+      `SELECT * FROM students WHERE id = $1 AND school_id = $2`,
+      [student_id, schoolId]
     );
 
     if (studentResult.rows.length === 0) {
-      return res.status(404).json({
-        error: "Student not found",
-      });
+      return res.status(404).json({ error: "Student not found" });
     }
 
-    // 3. Generate receipt number
-    const receipt_number =
-      "RCP-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+    const student = studentResult.rows[0];
 
-    // 4. Insert payment
-    const result = await pool.query(
-      `INSERT INTO payments 
-        (school_id, student_id, receipt_number, amount, payment_method, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [
+    // ===============================
+    // CALCULATE BALANCE
+    // ===============================
+    const paidResult = await client.query(
+      `SELECT COALESCE(SUM(amount),0) AS total_paid
+       FROM payments
+       WHERE student_id = $1 AND school_id = $2`,
+      [student_id, schoolId]
+    );
+
+    const totalPaidBefore = parseFloat(paidResult.rows[0].total_paid);
+    const expectedFees = parseFloat(student.expected_fees || 0);
+
+    const newTotalPaid = totalPaidBefore + parseFloat(amount);
+    const balanceAfter = expectedFees - newTotalPaid;
+
+    // ===============================
+    // RECEIPT NUMBER
+    // ===============================
+    const receipt_number = `RCP-${Date.now()}-${Math.floor(
+      Math.random() * 1000
+    )}`;
+
+    // ===============================
+    // ALLOCATION ENGINE
+    // ===============================
+    const allocation = allocatePayment(parseFloat(amount));
+
+    // ===============================
+    // INSERT PAYMENT
+    // ===============================
+    const result = await client.query(
+      `INSERT INTO payments (
         school_id,
         student_id,
         receipt_number,
         amount,
-        payment_method || "Cash",
-        notes || null,
+        payment_method,
+        category,
+        term,
+        academic_year,
+        notes,
+        allocation
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *`,
+      [
+        schoolId,
+        student_id,
+        receipt_number,
+        amount,
+        payment_method,
+        category,
+        term,
+        academic_year,
+        notes,
+        allocation,
       ]
     );
 
-    // 5. Response
-    res.status(201).json({
+    const payment = result.rows[0];
+
+    // ===============================
+    // UPDATE BALANCE SNAPSHOT
+    // ===============================
+    await client.query(
+      `UPDATE payments
+       SET balance_after = $1
+       WHERE id = $2`,
+      [balanceAfter, payment.id]
+    );
+
+    await client.query("COMMIT");
+
+    // ===============================
+    // RESPONSE
+    // ===============================
+    res.json({
       message: "Payment recorded successfully",
-      payment: result.rows[0],
+      payment: {
+        ...payment,
+        allocation,
+        balance_after: balanceAfter,
+        expected_fees: expectedFees,
+        total_paid: newTotalPaid,
+      },
     });
-  } catch (error) {
-    console.error("PAYMENT ERROR:", error);
+  } catch (err) {
+    await client.query("ROLLBACK");
+
+    console.error("PAYMENT ERROR:", err.message);
+
     res.status(500).json({
-      error: "Failed to record payment",
+      error: "Failed to create payment",
+      details: err.message,
     });
+  } finally {
+    client.release();
   }
 });
 
 // ===============================
-// GET STUDENT PAYMENTS
+// GET ALL PAYMENTS (SCHOOL)
 // ===============================
-router.get("/:student_id", auth, async (req, res) => {
+router.get("/", auth, async (req, res) => {
   try {
-    const school_id = req.user.schoolId;
-    const student_id = req.params.student_id;
+    const schoolId = req.user.schoolId;
 
     const result = await pool.query(
-  `INSERT INTO payments 
-   (school_id, student_id, receipt_number, amount, payment_method, category, term, academic_year, notes)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-   RETURNING *`,
-  [
-    school_id,
-    student_id,
-    receipt_number,
-    amount,
-    payment_method || "Cash",
-    req.body.category || "Tuition",
-    req.body.term || "Term 1",
-    req.body.academic_year || "2026",
-    notes || null
-  ]
-);
+      `SELECT * FROM payments
+       WHERE school_id = $1
+       ORDER BY created_at DESC`,
+      [schoolId]
+    );
 
-    res.json({
-      payments: result.rows,
-    });
-  } catch (error) {
-    console.error("GET PAYMENTS ERROR:", error);
+    res.json(result.rows);
+  } catch (err) {
     res.status(500).json({
       error: "Failed to fetch payments",
     });
