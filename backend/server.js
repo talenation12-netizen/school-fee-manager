@@ -9,6 +9,7 @@ const paymentRoutes = require("./routes/payments");
 const reportRoutes = require("./routes/reports");
 const receiptRoutes = require("./routes/receipts");
 const eventRoutes = require("./routes/events");
+const pdfRoutes = require("./routes/pdf");
 
 // =====================
 // MIDDLEWARE
@@ -17,6 +18,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/api/payments", require("./routes/payments"));
 app.use("/api/receipts", receiptRoutes);
+app.use("/api/pdf", pdfRoutes);
 
 // =====================
 // PUBLIC ROUTES (NO AUTH HERE)
