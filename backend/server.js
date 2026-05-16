@@ -15,6 +15,7 @@ const eventRoutes = require("./routes/events");
 // =====================
 app.use(cors());
 app.use(express.json());
+app.use("/api/payments", require("./routes/payments"));
 
 // =====================
 // PUBLIC ROUTES (NO AUTH HERE)
