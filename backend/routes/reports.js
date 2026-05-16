@@ -1,98 +1,63 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../db");
 const auth = require("../middleware/auth");
+const pool = require("../db");
 
-// =====================================
-// DASHBOARD METRICS (LIVE FROM DATABASE)
-// =====================================
-router.get("/dashboard", auth, async (req, res) => {
+// ========================================
+// GET /api/reports/defaulters
+// Students with outstanding balances
+// ========================================
+router.get("/defaulters", auth, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
 
-    // -----------------------------
-    // Total students and expected fees
-    // -----------------------------
-    const studentStats = await pool.query(
+    const result = await pool.query(
       `
       SELECT
-        COUNT(*) AS total_students,
-        COALESCE(SUM(expected_fees + opening_balance), 0) AS total_expected
-      FROM students
-      WHERE school_id = $1
+        s.id,
+        s.full_name,
+        s.admission_number,
+        s.class_name,
+        s.expected_fees,
+        COALESCE(SUM(p.amount), 0) AS total_paid,
+        s.expected_fees - COALESCE(SUM(p.amount), 0) AS balance
+      FROM students s
+      LEFT JOIN payments p
+        ON s.id = p.student_id
+       AND p.school_id = s.school_id
+      WHERE s.school_id = $1
+      GROUP BY
+        s.id,
+        s.full_name,
+        s.admission_number,
+        s.class_name,
+        s.expected_fees
+      HAVING s.expected_fees - COALESCE(SUM(p.amount), 0) > 0
+      ORDER BY balance DESC, s.full_name ASC
       `,
       [schoolId]
     );
 
-    // -----------------------------
-    // Total collected and transactions
-    // -----------------------------
-    const paymentStats = await pool.query(
-      `
-      SELECT
-        COUNT(*) AS transactions,
-        COALESCE(SUM(amount), 0) AS total_collected,
-        COALESCE(AVG(amount), 0) AS avg_payment
-      FROM payments
-      WHERE school_id = $1
-      `,
-      [schoolId]
-    );
-
-    const totalStudents = parseInt(
-      studentStats.rows[0].total_students,
-      10
-    );
-
-    const totalExpected = parseFloat(
-      studentStats.rows[0].total_expected
-    );
-
-    const transactions = parseInt(
-      paymentStats.rows[0].transactions,
-      10
-    );
-
-    const totalCollected = parseFloat(
-      paymentStats.rows[0].total_collected
-    );
-
-    const avgPayment = parseFloat(
-      paymentStats.rows[0].avg_payment
-    );
-
-    // -----------------------------
-    // Derived metrics
-    // -----------------------------
-    const totalOutstanding = totalExpected - totalCollected;
-
-    const collectionRate =
-      totalExpected > 0
-        ? parseFloat(
-            ((totalCollected / totalExpected) * 100).toFixed(2)
-          )
-        : 0;
-
-    // -----------------------------
-    // Response
-    // -----------------------------
     res.json({
-      totalStudents,
-      totalExpected,
-      totalCollected,
-      totalOutstanding,
-      transactions,
-      avgPayment: parseFloat(avgPayment.toFixed(2)),
-      collectionRate,
+      count: result.rows.length,
+      students: result.rows.map((row) => ({
+        ...row,
+        expected_fees: Number(row.expected_fees),
+        total_paid: Number(row.total_paid),
+        balance: Number(row.balance),
+      })),
     });
-  } catch (err) {
-    console.error("DASHBOARD ERROR:", err.message);
-
+  } catch (error) {
+    console.error("Defaulters report error:", error);
     res.status(500).json({
-      error: "Failed to load dashboard",
-      details: err.message,
+      error: "Failed to generate defaulters report",
     });
   }
 });
+
+// ========================================
+// GET /api/reports/dashboard
+// (Keep your existing dashboard endpoint below this)
+// ========================================
 
 module.exports = router;
