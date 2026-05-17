@@ -23,7 +23,7 @@ app.use("/api/receipts", receiptRoutes);
 app.use("/api/pdf", pdfRoutes);
 app.use("/api/students", statementRoutes);
 app.use("/api/ledger", ledgerRoutes);
-
+app.use("/api/statements", statementRoutes);
 // =====================
 // PUBLIC ROUTES (NO AUTH HERE)
 // =====================

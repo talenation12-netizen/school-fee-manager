@@ -16,7 +16,7 @@ router.get("/test", (req, res) => {
 });
 
 // =========================
-// CREATE PAYMENT (SPRINT 15)
+// CREATE PAYMENT (SPRINT 15 FINAL)
 // =========================
 router.post("/", auth, async (req, res) => {
   try {
@@ -68,7 +68,7 @@ router.post("/", auth, async (req, res) => {
     const allocation = allocatePayment(amount);
 
     // =========================
-    // CALCULATE BALANCE
+    // BALANCE CALCULATION
     // =========================
     const totalPaidResult = await pool.query(
       `
@@ -83,7 +83,21 @@ router.post("/", auth, async (req, res) => {
     const newPaid = previousPaid + Number(amount);
 
     const expectedFees = Number(student.expected_fees);
-    const balanceAfter = expectedFees - newPaid;
+
+    let balanceAfter = expectedFees - newPaid;
+
+    // =========================
+    // CREDIT LOGIC (OPTION 2 - COMPUTED ONLY)
+    // =========================
+    let credit = newPaid - expectedFees;
+
+    if (credit < 0) {
+      credit = 0;
+    }
+
+    if (balanceAfter < 0) {
+      balanceAfter = 0;
+    }
 
     // =========================
     // RECEIPT NUMBER
@@ -135,7 +149,7 @@ router.post("/", auth, async (req, res) => {
     const payment = paymentResult.rows[0];
 
     // =========================
-    // LEDGER INSERTION (SPRINT 15 PART 2)
+    // LEDGER INSERTION
     // =========================
     const categories = ["tuition", "lunch", "transport"];
 
@@ -179,6 +193,7 @@ router.post("/", auth, async (req, res) => {
         expectedFees,
         totalPaid: newPaid,
         balance: balanceAfter,
+        credit,
         allocation,
       },
     });

@@ -4,103 +4,101 @@ const router = express.Router();
 const pool = require("../db");
 const auth = require("../middleware/auth");
 
-/**
- * GET STUDENT STATEMENT
- * /api/students/:id/statement
- */
-router.get("/:id/statement", auth, async (req, res) => {
+// =========================
+// STUDENT STATEMENT (SPRINT 16)
+// =========================
+router.get("/:studentId", auth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const { studentId } = req.params;
     const { schoolId } = req.user;
 
     // =========================
-    // 1. GET STUDENT INFO
+    // GET STUDENT
     // =========================
-    const studentRes = await pool.query(
-      `SELECT id, full_name, admission_number, class_name, expected_fees
-       FROM students
-       WHERE id = $1 AND school_id = $2`,
-      [id, schoolId]
+    const studentResult = await pool.query(
+      `
+      SELECT * FROM students
+      WHERE id = $1 AND school_id = $2
+      `,
+      [studentId, schoolId]
     );
 
-    if (studentRes.rows.length === 0) {
+    if (!studentResult.rows.length) {
       return res.status(404).json({ error: "Student not found" });
     }
 
-    const student = studentRes.rows[0];
+    const student = studentResult.rows[0];
 
     // =========================
-    // 2. GET ALL PAYMENTS
+    // GET PAYMENTS
     // =========================
-    const paymentsRes = await pool.query(
-      `SELECT id, amount, payment_method, category, term, academic_year, notes, created_at, allocation
-       FROM payments
-       WHERE student_id = $1 AND school_id = $2
-       ORDER BY created_at ASC`,
-      [id, schoolId]
+    const paymentsResult = await pool.query(
+      `
+      SELECT *
+      FROM payments
+      WHERE student_id = $1 AND school_id = $2
+      ORDER BY created_at ASC
+      `,
+      [studentId, schoolId]
     );
 
-    const payments = paymentsRes.rows;
+    const payments = paymentsResult.rows;
 
     // =========================
-    // 3. BUILD LEDGER
+    // GET LEDGER
     // =========================
-    let balance = Number(student.expected_fees);
-    const ledger = [];
-
-    // Opening balance row
-    ledger.push({
-      date: null,
-      description: "Opening Balance",
-      debit: balance,
-      credit: 0,
-      balance,
-    });
-
-    // Process payments
-    for (const p of payments) {
-      balance -= Number(p.amount);
-
-      ledger.push({
-        date: p.created_at,
-        description: `Payment - ${p.category} (${p.payment_method})`,
-        debit: 0,
-        credit: Number(p.amount),
-        balance,
-        allocation: p.allocation,
-        receipt: p.id,
-      });
-    }
-
-    // =========================
-    // 4. SUMMARY
-    // =========================
-    const totalPaid = payments.reduce(
-      (sum, p) => sum + Number(p.amount),
-      0
+    const ledgerResult = await pool.query(
+      `
+      SELECT *
+      FROM student_ledger
+      WHERE student_id = $1 AND school_id = $2
+      ORDER BY created_at ASC
+      `,
+      [studentId, schoolId]
     );
 
-    const statement = {
+    const ledger = ledgerResult.rows;
+
+    // =========================
+    // CALCULATE SUMMARY
+    // =========================
+    const totalPaidResult = await pool.query(
+      `
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM payments
+      WHERE student_id = $1 AND school_id = $2
+      `,
+      [studentId, schoolId]
+    );
+
+    const totalPaid = Number(totalPaidResult.rows[0].total);
+    const expectedFees = Number(student.expected_fees);
+    const balance = expectedFees - totalPaid;
+
+    const status =
+      balance <= 0 ? "PAID" : "OWING";
+
+    // =========================
+    // STATEMENT RESPONSE
+    // =========================
+    res.json({
       student,
       summary: {
-        expectedFees: Number(student.expected_fees),
+        expectedFees,
         totalPaid,
-        balance,
-        status:
-          balance <= 0
-            ? "CLEARED"
-            : totalPaid === 0
-            ? "NOT PAID"
-            : "OWING",
+        balance: balance < 0 ? 0 : balance,
+        credit: balance < 0 ? Math.abs(balance) : 0,
+        status,
       },
+      payments,
       ledger,
-    };
-
-    res.json(statement);
+    });
   } catch (error) {
     console.error("STATEMENT ERROR:", error);
+
     res.status(500).json({
       error: "Failed to generate statement",
+      details: error.message,
     });
   }
 });
