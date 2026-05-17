@@ -3,8 +3,11 @@ const router = express.Router();
 
 const pool = require("../db");
 const auth = require("../middleware/auth");
+const { allocatePayment } = require("../utils/allocationEngine");
 
-// GET /api/payments/test
+// =========================
+// TEST ROUTE
+// =========================
 router.get("/test", (req, res) => {
   res.json({
     ok: true,
@@ -12,7 +15,9 @@ router.get("/test", (req, res) => {
   });
 });
 
-// POST /api/payments
+// =========================
+// CREATE PAYMENT (SPRINT 15)
+// =========================
 router.post("/", auth, async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -25,28 +30,23 @@ router.post("/", auth, async (req, res) => {
       term,
       academic_year,
       notes,
-      allocation,
     } = req.body;
 
     // =========================
-    // VALIDATION (IMPORTANT)
+    // VALIDATION
     // =========================
     if (!student_id || isNaN(student_id)) {
-      return res.status(400).json({
-        error: "Invalid student_id",
-      });
+      return res.status(400).json({ error: "Invalid student_id" });
     }
 
-    if (!amount || isNaN(amount) || amount <= 0) {
-      return res.status(400).json({
-        error: "Invalid amount",
-      });
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
     }
 
     // =========================
-    // STUDENT CHECK (FIXED)
+    // FIND STUDENT
     // =========================
-    const studentCheck = await pool.query(
+    const studentResult = await pool.query(
       `
       SELECT * FROM students
       WHERE id = $1 AND school_id = $2
@@ -54,17 +54,36 @@ router.post("/", auth, async (req, res) => {
       [student_id, schoolId]
     );
 
-    if (!studentCheck.rows.length) {
+    if (!studentResult.rows.length) {
       return res.status(404).json({
         error: "Student not found in this school",
-        debug: {
-          student_id,
-          schoolId,
-        },
       });
     }
 
-    const student = studentCheck.rows[0];
+    const student = studentResult.rows[0];
+
+    // =========================
+    // ALLOCATION ENGINE
+    // =========================
+    const allocation = allocatePayment(amount);
+
+    // =========================
+    // CALCULATE BALANCE
+    // =========================
+    const totalPaidResult = await pool.query(
+      `
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM payments
+      WHERE student_id = $1 AND school_id = $2
+      `,
+      [student_id, schoolId]
+    );
+
+    const previousPaid = Number(totalPaidResult.rows[0].total);
+    const newPaid = previousPaid + Number(amount);
+
+    const expectedFees = Number(student.expected_fees);
+    const balanceAfter = expectedFees - newPaid;
 
     // =========================
     // RECEIPT NUMBER
@@ -76,7 +95,7 @@ router.post("/", auth, async (req, res) => {
     // =========================
     // INSERT PAYMENT
     // =========================
-    const result = await pool.query(
+    const paymentResult = await pool.query(
       `
       INSERT INTO payments (
         school_id,
@@ -89,10 +108,11 @@ router.post("/", auth, async (req, res) => {
         academic_year,
         notes,
         recorded_by,
-        allocation
+        allocation,
+        balance_after
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
       )
       RETURNING *
       `,
@@ -107,19 +127,59 @@ router.post("/", auth, async (req, res) => {
         academic_year,
         notes,
         schoolId,
-        allocation || {},
+        allocation,
+        balanceAfter,
       ]
     );
+
+    const payment = paymentResult.rows[0];
+
+    // =========================
+    // LEDGER INSERTION (SPRINT 15 PART 2)
+    // =========================
+    const categories = ["tuition", "lunch", "transport"];
+
+    for (const cat of categories) {
+      if (allocation[cat] > 0) {
+        await pool.query(
+          `
+          INSERT INTO student_ledger (
+            school_id,
+            student_id,
+            payment_id,
+            category,
+            amount,
+            balance_after
+          )
+          VALUES ($1,$2,$3,$4,$5,$6)
+          `,
+          [
+            schoolId,
+            student_id,
+            payment.id,
+            cat,
+            allocation[cat],
+            balanceAfter,
+          ]
+        );
+      }
+    }
 
     // =========================
     // RESPONSE
     // =========================
     res.status(201).json({
       message: "Payment recorded successfully",
-      payment: result.rows[0],
+      payment,
       student: {
         id: student.id,
         full_name: student.full_name,
+      },
+      meta: {
+        expectedFees,
+        totalPaid: newPaid,
+        balance: balanceAfter,
+        allocation,
       },
     });
   } catch (error) {

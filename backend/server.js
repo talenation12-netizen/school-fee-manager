@@ -10,6 +10,7 @@ const reportRoutes = require("./routes/reports");
 const receiptRoutes = require("./routes/receipts");
 const eventRoutes = require("./routes/events");
 const pdfRoutes = require("./routes/pdf");
+const ledgerRoutes = require("./routes/ledger");
 const statementRoutes = require("./routes/statements");
 
 // =====================
@@ -21,6 +22,7 @@ app.use("/api/payments", require("./routes/payments"));
 app.use("/api/receipts", receiptRoutes);
 app.use("/api/pdf", pdfRoutes);
 app.use("/api/students", statementRoutes);
+app.use("/api/ledger", ledgerRoutes);
 
 // =====================
 // PUBLIC ROUTES (NO AUTH HERE)

@@ -1,69 +1,33 @@
-async function allocatePayment(client, schoolId, studentId, paymentAmount) {
-  const structureResult = await client.query(
-    `
-    SELECT category, amount, priority
-    FROM fee_structure
-    WHERE school_id = $1
-      AND student_id = $2
-    ORDER BY priority ASC, id ASC
-    `,
-    [schoolId, studentId]
-  );
+// Sprint 15 — Smart Allocation Engine (Africa School Model)
 
-  const feeStructure = structureResult.rows;
+function allocatePayment(amount) {
+  const total = Number(amount);
 
-  // No fee structure: assign everything to Tuition
-  if (feeStructure.length === 0) {
+  if (!total || total <= 0) {
     return {
-      Tuition: Number(paymentAmount),
+      tuition: 0,
+      lunch: 0,
+      transport: 0,
+      adjustment: 0,
     };
   }
 
-  const paidResult = await client.query(
-    `
-    SELECT allocation
-    FROM payments
-    WHERE school_id = $1
-      AND student_id = $2
-    `,
-    [schoolId, studentId]
-  );
+  const allocation = {};
 
-  const alreadyPaid = {};
+  // PRIORITY RULES (edit later per school policy)
+  const tuition = Math.floor(total * 0.6);
+  const lunch = Math.floor(total * 0.2);
+  const transport = Math.floor(total * 0.2);
 
-  for (const row of paidResult.rows) {
-    const allocation = row.allocation || {};
-    for (const [category, amount] of Object.entries(allocation)) {
-      alreadyPaid[category] =
-        (alreadyPaid[category] || 0) + Number(amount);
-    }
-  }
+  allocation.tuition = tuition;
+  allocation.lunch = lunch;
+  allocation.transport = transport;
 
-  let remaining = Number(paymentAmount);
-  const newAllocation = {};
+  // Fix rounding remainder
+  const used = tuition + lunch + transport;
+  allocation.adjustment = total - used;
 
-  for (const item of feeStructure) {
-    if (remaining <= 0) break;
-
-    const required = Number(item.amount);
-    const paid = alreadyPaid[item.category] || 0;
-    const outstanding = Math.max(required - paid, 0);
-
-    if (outstanding <= 0) continue;
-
-    const allocate = Math.min(remaining, outstanding);
-
-    newAllocation[item.category] = allocate;
-    remaining -= allocate;
-  }
-
-  // Overpayments go to Advance
-  if (remaining > 0) {
-    newAllocation.Advance =
-      (newAllocation.Advance || 0) + remaining;
-  }
-
-  return newAllocation;
+  return allocation;
 }
 
-module.exports = allocatePayment;
+module.exports = { allocatePayment };
