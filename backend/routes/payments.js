@@ -1,200 +1,109 @@
-const express = require("express");
-const router = express.Router();
-const pool = require("../db");
-const auth = require("../middleware/auth");
+import { dbPromise } from "./db";
+import API from "../api/api";
 
-// ===============================
-// ALLOCATION ENGINE
-// ===============================
-function allocatePayment(amount) {
-  const rules = {
-    tuition: 0.6,
-    transport: 0.15,
-    meals: 0.1,
-    boarding: 0.1,
-    development: 0.05,
-  };
-
-  const allocation = {};
-
-  for (const key in rules) {
-    allocation[key] = parseFloat((amount * rules[key]).toFixed(2));
-  }
-
-  return allocation;
+/**
+ * Generate unique idempotency key
+ * Prevents duplicate payments during retries / offline sync
+ */
+function generateIdempotencyKey() {
+  return (
+    "PAY-" +
+    Date.now() +
+    "-" +
+    Math.random().toString(36).substring(2, 10)
+  );
 }
 
-// ===============================
-// POST PAYMENT (CORE ENGINE)
-// ===============================
-router.post("/", auth, async (req, res) => {
-  const client = await pool.connect();
+/**
+ * Save payment (Offline-first)
+ * 1. Saves locally first
+ * 2. Attempts server sync
+ * 3. Falls back to offline queue if failed
+ */
+export async function savePayment(payment) {
+  const db = await dbPromise;
 
+  const idempotencyKey = generateIdempotencyKey();
+
+  const payload = {
+    ...payment,
+    idempotency_key: idempotencyKey,
+  };
+
+  // =========================
+  // 1. SAVE LOCALLY FIRST
+  // =========================
+  const localId = await db.add("payments", {
+    ...payload,
+    status: "PENDING",
+    createdAt: new Date().toISOString(),
+  });
+
+  // =========================
+  // 2. ADD TO SYNC QUEUE
+  // =========================
+  await db.add("syncQueue", {
+    type: "PAYMENT",
+    payload: {
+      ...payload,
+      localId,
+    },
+    createdAt: new Date().toISOString(),
+  });
+
+  // =========================
+  // 3. TRY IMMEDIATE SYNC
+  // =========================
   try {
-    await client.query("BEGIN");
+    const { data } = await API.post("/payments", payload);
 
-    const {
-      student_id,
-      amount,
-      payment_method = "Cash",
-      category = "Tuition",
-      term = "Term 1",
-      academic_year = "2026",
-      notes = "",
-    } = req.body;
-
-    const schoolId = req.user.schoolId;
-
-    // ===============================
-    // VALIDATION
-    // ===============================
-    if (!student_id || !amount) {
-      return res.status(400).json({
-        error: "student_id and amount are required",
-      });
-    }
-
-    if (amount <= 0) {
-      return res.status(400).json({
-        error: "Amount must be greater than 0",
-      });
-    }
-
-    // ===============================
-    // GET STUDENT
-    // ===============================
-    const studentResult = await client.query(
-      `SELECT * FROM students WHERE id = $1 AND school_id = $2`,
-      [student_id, schoolId]
-    );
-
-    if (studentResult.rows.length === 0) {
-      return res.status(404).json({ error: "Student not found" });
-    }
-
-    const student = studentResult.rows[0];
-
-    // ===============================
-    // CALCULATE BALANCE
-    // ===============================
-    const paidResult = await client.query(
-      `SELECT COALESCE(SUM(amount),0) AS total_paid
-       FROM payments
-       WHERE student_id = $1 AND school_id = $2`,
-      [student_id, schoolId]
-    );
-
-    const totalPaidBefore = parseFloat(paidResult.rows[0].total_paid);
-    const expectedFees = parseFloat(student.expected_fees || 0);
-
-    const newTotalPaid = totalPaidBefore + parseFloat(amount);
-    const balanceAfter = expectedFees - newTotalPaid;
-
-    // ===============================
-    // RECEIPT NUMBER
-    // ===============================
-    const receipt_number = `RCP-${Date.now()}-${Math.floor(
-      Math.random() * 1000
-    )}`;
-
-    // ===============================
-    // ALLOCATION ENGINE
-    // ===============================
-    const allocation = allocatePayment(parseFloat(amount));
-
-    // ===============================
-    // INSERT PAYMENT
-    // ===============================
-    const result = await client.query(
-      `INSERT INTO payments (
-        school_id,
-        student_id,
-        receipt_number,
-        amount,
-        payment_method,
-        category,
-        term,
-        academic_year,
-        notes,
-        allocation
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      RETURNING *`,
-      [
-        schoolId,
-        student_id,
-        receipt_number,
-        amount,
-        payment_method,
-        category,
-        term,
-        academic_year,
-        notes,
-        allocation,
-      ]
-    );
-
-    const payment = result.rows[0];
-
-    // ===============================
-    // UPDATE BALANCE SNAPSHOT
-    // ===============================
-    await client.query(
-      `UPDATE payments
-       SET balance_after = $1
-       WHERE id = $2`,
-      [balanceAfter, payment.id]
-    );
-
-    await client.query("COMMIT");
-
-    // ===============================
-    // RESPONSE
-    // ===============================
-    res.json({
-      message: "Payment recorded successfully",
-      payment: {
-        ...payment,
-        allocation,
-        balance_after: balanceAfter,
-        expected_fees: expectedFees,
-        total_paid: newTotalPaid,
-      },
+    // Update local record → SYNCED
+    await db.put("payments", {
+      id: localId,
+      ...data.payment,
+      status: "SYNCED",
     });
+
+    // Remove from sync queue if exists
+    const queueItems = await db.getAll("syncQueue");
+    const item = queueItems.find(
+      (q) => q.payload.localId === localId
+    );
+
+    if (item) {
+      await db.delete("syncQueue", item.id);
+    }
+
+    return {
+      success: true,
+      synced: true,
+      payment: data.payment,
+    };
   } catch (err) {
-    await client.query("ROLLBACK");
+    console.log("📴 Offline mode — payment stored locally");
 
-    console.error("PAYMENT ERROR:", err.message);
-
-    res.status(500).json({
-      error: "Failed to create payment",
-      details: err.message,
-    });
-  } finally {
-    client.release();
+    return {
+      success: true,
+      synced: false,
+      localId,
+    };
   }
-});
+}
 
-// ===============================
-// GET ALL PAYMENTS (SCHOOL)
-// ===============================
-router.get("/", auth, async (req, res) => {
-  try {
-    const schoolId = req.user.schoolId;
+/**
+ * Get all local payments (for UI)
+ */
+export async function getLocalPayments() {
+  const db = await dbPromise;
+  const payments = await db.getAll("payments");
 
-    const result = await pool.query(
-      `SELECT * FROM payments
-       WHERE school_id = $1
-       ORDER BY created_at DESC`,
-      [schoolId]
-    );
+  return payments.sort((a, b) => b.id - a.id);
+}
 
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({
-      error: "Failed to fetch payments",
-    });
-  }
-});
-
-module.exports = router;
+/**
+ * Delete local payment (rare use case)
+ */
+export async function deleteLocalPayment(id) {
+  const db = await dbPromise;
+  await db.delete("payments", id);
+}
