@@ -1,4 +1,4 @@
-import { dbPromise } from "./db";
+import { dbPromise } from "../db";
 import API from "../api/api";
 
 /**
