@@ -5,7 +5,7 @@ const pool = require("../db");
 const auth = require("../middleware/auth");
 
 // =========================
-// STUDENT STATEMENT (SPRINT 16)
+// STUDENT STATEMENT ENGINE v2 (PRODUCTION READY)
 // =========================
 router.get("/:studentId", auth, async (req, res) => {
   try {
@@ -30,7 +30,7 @@ router.get("/:studentId", auth, async (req, res) => {
     const student = studentResult.rows[0];
 
     // =========================
-    // GET PAYMENTS
+    // GET PAYMENTS (TIMELINE)
     // =========================
     const paymentsResult = await pool.query(
       `
@@ -45,7 +45,7 @@ router.get("/:studentId", auth, async (req, res) => {
     const payments = paymentsResult.rows;
 
     // =========================
-    // GET LEDGER
+    // GET LEDGER (BREAKDOWN)
     // =========================
     const ledgerResult = await pool.query(
       `
@@ -60,7 +60,7 @@ router.get("/:studentId", auth, async (req, res) => {
     const ledger = ledgerResult.rows;
 
     // =========================
-    // CALCULATE SUMMARY
+    // TOTAL PAID
     // =========================
     const totalPaidResult = await pool.query(
       `
@@ -73,23 +73,76 @@ router.get("/:studentId", auth, async (req, res) => {
 
     const totalPaid = Number(totalPaidResult.rows[0].total);
     const expectedFees = Number(student.expected_fees);
-    const balance = expectedFees - totalPaid;
-
-    const status =
-      balance <= 0 ? "PAID" : "OWING";
 
     // =========================
-    // STATEMENT RESPONSE
+    // CORE FINANCIAL LOGIC
+    // =========================
+    let balance = expectedFees - totalPaid;
+    let credit = 0;
+    let status = "OWING";
+
+    if (totalPaid === expectedFees) {
+      balance = 0;
+      status = "PAID";
+    } else if (totalPaid > expectedFees) {
+      credit = totalPaid - expectedFees;
+      balance = 0;
+      status = "OVERPAID";
+    }
+
+    // =========================
+    // OPTIONAL ENRICHMENTS (FOR PDF / UI)
+    // =========================
+
+    const lastPayment =
+      payments.length > 0 ? payments[payments.length - 1] : null;
+
+    const paymentCount = payments.length;
+
+    const totalAllocated = ledger.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0
+    );
+
+    // Category breakdown (useful for analytics)
+    const breakdown = ledger.reduce(
+      (acc, item) => {
+        acc[item.category] =
+          (acc[item.category] || 0) + Number(item.amount);
+        return acc;
+      },
+      {}
+    );
+
+    // =========================
+    // RESPONSE (CLEAN + PDF READY)
     // =========================
     res.json({
-      student,
+      student: {
+        id: student.id,
+        school_id: student.school_id,
+        full_name: student.full_name,
+        admission_number: student.admission_number,
+        class_name: student.class_name,
+        expected_fees: expectedFees,
+      },
+
       summary: {
         expectedFees,
         totalPaid,
-        balance: balance < 0 ? 0 : balance,
-        credit: balance < 0 ? Math.abs(balance) : 0,
+        balance,
+        credit,
         status,
       },
+
+      analytics: {
+        paymentCount,
+        totalAllocated,
+        breakdown,
+      },
+
+      lastPayment,
+
       payments,
       ledger,
     });

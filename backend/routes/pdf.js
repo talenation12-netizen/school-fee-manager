@@ -1,286 +1,114 @@
-// const express = require("express");
-// const PDFDocument = require("pdfkit");
-// const router = express.Router();
-
-// const auth = require("../middleware/auth");
-// const pool = require("../db");
-
-
-// // =====================================================
-// // 📄 PDF STUDENT STATEMENT
-// // GET /api/pdf/student-statement/:id
-// // =====================================================
-// router.get("/student-statement/:id", auth, async (req, res) => {
-//   try {
-//     const schoolId = req.user.schoolId;
-//     const studentId = req.params.id;
-
-//     const studentRes = await pool.query(
-//       `
-//       SELECT * FROM students
-//       WHERE id = $1 AND school_id = $2
-//       `,
-//       [studentId, schoolId]
-//     );
-
-//     if (!studentRes.rows.length) {
-//       return res.status(404).json({ error: "Student not found" });
-//     }
-
-//     const student = studentRes.rows[0];
-
-//     const paymentsRes = await pool.query(
-//       `
-//       SELECT * FROM payments
-//       WHERE student_id = $1 AND school_id = $2
-//       ORDER BY created_at ASC
-//       `,
-//       [studentId, schoolId]
-//     );
-
-//     const doc = new PDFDocument({ margin: 40 });
-
-//     res.setHeader("Content-Type", "application/pdf");
-//     res.setHeader(
-//       "Content-Disposition",
-//       `inline; filename=statement-${studentId}.pdf`
-//     );
-
-//     doc.pipe(res);
-
-//     // HEADER
-//     doc.fontSize(20).text("SCHOOL FEE STATEMENT", { align: "center" });
-//     doc.moveDown();
-
-//     doc.fontSize(12).text(`Name: ${student.full_name}`);
-//     doc.text(`Admission: ${student.admission_number}`);
-//     doc.text(`Class: ${student.class_name}`);
-//     doc.moveDown();
-
-//     let balance =
-//       Number(student.expected_fees || 0) +
-//       Number(student.opening_balance || 0);
-
-//     doc.fontSize(14).text(`Opening Balance: ${balance}`);
-//     doc.moveDown();
-
-//     // TABLE HEADER
-//     doc.fontSize(12).text("Date | Receipt | Amount | Balance");
-//     doc.moveDown(0.5);
-
-//     // TRANSACTIONS
-//     paymentsRes.rows.forEach((p) => {
-//       balance -= Number(p.amount);
-
-//       doc.text(
-//         `${new Date(p.created_at).toDateString()} | ${p.receipt_number} | ${p.amount} | ${balance}`
-//       );
-//     });
-
-//     doc.moveDown();
-
-//     const status =
-//       balance > 0 ? "OWING" : balance < 0 ? "OVERPAID" : "PAID";
-
-//     doc.fontSize(14).text(`FINAL BALANCE: ${balance}`);
-//     doc.text(`STATUS: ${status}`);
-
-//     doc.end();
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: "Failed to generate PDF" });
-//   }
-// });
-
-
-// // =====================================================
-// // 🧾 PDF RECEIPT
-// // GET /api/pdf/receipt/:paymentId
-// // =====================================================
-// router.get("/receipt/:paymentId", auth, async (req, res) => {
-//   try {
-//     const paymentId = req.params.paymentId;
-//     const schoolId = req.user.schoolId;
-
-//     const paymentRes = await pool.query(
-//       `
-//       SELECT p.*, s.full_name, s.admission_number
-//       FROM payments p
-//       JOIN students s ON s.id = p.student_id
-//       WHERE p.id = $1 AND p.school_id = $2
-//       `,
-//       [paymentId, schoolId]
-//     );
-
-//     if (!paymentRes.rows.length) {
-//       return res.status(404).json({ error: "Payment not found" });
-//     }
-
-//     const p = paymentRes.rows[0];
-
-//     const doc = new PDFDocument();
-
-//     res.setHeader("Content-Type", "application/pdf");
-//     res.setHeader(
-//       "Content-Disposition",
-//       `inline; filename=receipt-${paymentId}.pdf`
-//     );
-
-//     doc.pipe(res);
-
-//     doc.fontSize(20).text("PAYMENT RECEIPT", { align: "center" });
-//     doc.moveDown();
-
-//     doc.fontSize(12).text(`Receipt: ${p.receipt_number}`);
-//     doc.text(`Name: ${p.full_name}`);
-//     doc.text(`Admission: ${p.admission_number}`);
-//     doc.text(`Amount Paid: KES ${p.amount}`);
-//     doc.text(`Method: ${p.payment_method}`);
-//     doc.text(`Date: ${p.created_at}`);
-
-//     doc.end();
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: "Failed to generate receipt PDF" });
-//   }
-// });
-
-// module.exports = router;
-
-
-
 const express = require("express");
 const router = express.Router();
-const PDFDocument = require("pdfkit");
 
+const PDFDocument = require("pdfkit");
 const pool = require("../db");
 const auth = require("../middleware/auth");
 
-// ======================================
-// 🧾 STUDENT STATEMENT PDF
-// ======================================
-router.get("/student-statement/:id", auth, async (req, res) => {
+// =========================
+// STUDENT STATEMENT PDF
+// =========================
+router.get("/student-statement/:studentId", auth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const { studentId } = req.params;
     const { schoolId } = req.user;
 
-    // Get student
-    const studentRes = await pool.query(
-      `SELECT * FROM students WHERE id = $1 AND school_id = $2`,
-      [id, schoolId]
+    const student = await pool.query(
+      `SELECT * FROM students WHERE id=$1 AND school_id=$2`,
+      [studentId, schoolId]
     );
 
-    if (studentRes.rows.length === 0) {
+    if (!student.rows.length) {
       return res.status(404).json({ error: "Student not found" });
     }
 
-    const student = studentRes.rows[0];
-
-    // Get payments
-    const paymentsRes = await pool.query(
-      `SELECT * FROM payments 
-       WHERE student_id = $1 AND school_id = $2
-       ORDER BY created_at ASC`,
-      [id, schoolId]
+    const payments = await pool.query(
+      `SELECT * FROM payments WHERE student_id=$1 AND school_id=$2 ORDER BY created_at ASC`,
+      [studentId, schoolId]
     );
 
-    const payments = paymentsRes.rows;
-
-    // PDF setup
     const doc = new PDFDocument();
-    res.setHeader("Content-Type", "application/pdf");
+
     res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=statement-${student.admission_number}.pdf`
+      "Content-Type",
+      "application/pdf"
     );
 
     doc.pipe(res);
 
+    // =========================
     // HEADER
-    doc.fontSize(18).text("SCHOOL FEE STATEMENT", { align: "center" });
+    // =========================
+    doc.fontSize(18).text("SCHOOL STATEMENT", { align: "center" });
     doc.moveDown();
 
-    doc.fontSize(12).text(`Name: ${student.full_name}`);
-    doc.text(`Admission No: ${student.admission_number}`);
-    doc.text(`Class: ${student.class_name}`);
-    doc.text(`Expected Fees: ${student.expected_fees}`);
+    doc.fontSize(12).text(`Name: ${student.rows[0].full_name}`);
+    doc.text(`Admission: ${student.rows[0].admission_number}`);
+    doc.text(`Class: ${student.rows[0].class_name}`);
     doc.moveDown();
 
-    // TABLE HEADER
-    doc.fontSize(12).text("PAYMENT HISTORY:");
+    // =========================
+    // PAYMENTS TABLE
+    // =========================
+    doc.fontSize(14).text("PAYMENT HISTORY");
     doc.moveDown();
 
-    let totalPaid = 0;
-
-    payments.forEach((p, index) => {
-      totalPaid += Number(p.amount);
-
-      doc.text(
-        `${index + 1}. ${p.created_at.toISOString().split("T")[0]} | ${
-          p.category
-        } | ${p.amount} | ${p.payment_method}`
-      );
+    payments.rows.forEach((p, i) => {
+      doc
+        .fontSize(10)
+        .text(
+          `${i + 1}. ${p.created_at} | ${p.amount} | ${p.category} | ${p.receipt_number}`
+        );
     });
-
-    const balance = Number(student.expected_fees) - totalPaid;
-
-    doc.moveDown();
-    doc.text("SUMMARY:");
-    doc.text(`Total Paid: ${totalPaid}`);
-    doc.text(`Balance: ${balance}`);
 
     doc.end();
   } catch (err) {
-    console.error("PDF ERROR:", err);
-    res.status(500).json({ error: "Failed to generate statement PDF" });
+    console.error(err);
+    res.status(500).json({ error: "PDF generation failed" });
   }
 });
 
-// ======================================
-// 🧾 RECEIPT PDF
-// ======================================
+// =========================
+// RECEIPT PDF
+// =========================
 router.get("/receipt/:paymentId", auth, async (req, res) => {
   try {
     const { paymentId } = req.params;
     const { schoolId } = req.user;
 
-    const paymentRes = await pool.query(
-      `SELECT p.*, s.full_name, s.admission_number
-       FROM payments p
-       JOIN students s ON s.id = p.student_id
-       WHERE p.id = $1 AND p.school_id = $2`,
+    const payment = await pool.query(
+      `SELECT * FROM payments WHERE id=$1 AND school_id=$2`,
       [paymentId, schoolId]
     );
 
-    if (paymentRes.rows.length === 0) {
+    if (!payment.rows.length) {
       return res.status(404).json({ error: "Payment not found" });
     }
 
-    const payment = paymentRes.rows[0];
-
     const doc = new PDFDocument();
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=receipt-${payment.receipt_number}.pdf`
-    );
 
+    res.setHeader("Content-Type", "application/pdf");
     doc.pipe(res);
 
-    doc.fontSize(18).text("PAYMENT RECEIPT", { align: "center" });
+    const p = payment.rows[0];
+
+    // =========================
+    // RECEIPT HEADER
+    // =========================
+    doc.fontSize(20).text("PAYMENT RECEIPT", { align: "center" });
     doc.moveDown();
 
-    doc.fontSize(12).text(`Receipt No: ${payment.receipt_number}`);
-    doc.text(`Student: ${payment.full_name}`);
-    doc.text(`Admission No: ${payment.admission_number}`);
-    doc.text(`Amount Paid: ${payment.amount}`);
-    doc.text(`Method: ${payment.payment_method}`);
-    doc.text(`Date: ${payment.created_at}`);
+    doc.fontSize(12).text(`Receipt No: ${p.receipt_number}`);
+    doc.text(`Student ID: ${p.student_id}`);
+    doc.text(`Amount: ${p.amount}`);
+    doc.text(`Method: ${p.payment_method}`);
+    doc.text(`Category: ${p.category}`);
+    doc.text(`Date: ${p.created_at}`);
 
     doc.end();
   } catch (err) {
-    console.error("RECEIPT PDF ERROR:", err);
-    res.status(500).json({ error: "Failed to generate receipt PDF" });
+    console.error(err);
+    res.status(500).json({ error: "Receipt PDF failed" });
   }
 });
 
