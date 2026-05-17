@@ -17,15 +17,16 @@ router.post("/", auth, async (req, res) => {
   try {
     const { schoolId } = req.user;
 
-    const {
-      student_id,
-      amount,
-      payment_method = "Cash",
-      category = "Tuition",
-      term = "Term 1",
-      academic_year = "2026",
-      notes = "",
-    } = req.body;
+     const {
+            student_id,
+          amount,
+           payment_method = "Cash",
+          category = "Tuition",
+          term = "Term 1",
+          academic_year = "2026",
+         notes = "",
+         allocation = {}
+          } = req.body;
 
     const receipt_number = `RCP-${Date.now()}-${Math.floor(
       Math.random() * 1000
