@@ -1,109 +1,192 @@
-import { dbPromise } from "../db";
-import API from "../api/api";
+// import { dbPromise } from "../db";
+// import API from "../api/api";
 
-/**
- * Generate unique idempotency key
- * Prevents duplicate payments during retries / offline sync
- */
-function generateIdempotencyKey() {
-  return (
-    "PAY-" +
-    Date.now() +
-    "-" +
-    Math.random().toString(36).substring(2, 10)
-  );
-}
+// /**
+//  * Generate unique idempotency key
+//  * Prevents duplicate payments during retries / offline sync
+//  */
+// function generateIdempotencyKey() {
+//   return (
+//     "PAY-" +
+//     Date.now() +
+//     "-" +
+//     Math.random().toString(36).substring(2, 10)
+//   );
+// }
 
-/**
- * Save payment (Offline-first)
- * 1. Saves locally first
- * 2. Attempts server sync
- * 3. Falls back to offline queue if failed
- */
-export async function savePayment(payment) {
-  const db = await dbPromise;
+// /**
+//  * Save payment (Offline-first)
+//  * 1. Saves locally first
+//  * 2. Attempts server sync
+//  * 3. Falls back to offline queue if failed
+//  */
+// export async function savePayment(payment) {
+//   const db = await dbPromise;
 
-  const idempotencyKey = generateIdempotencyKey();
+//   const idempotencyKey = generateIdempotencyKey();
 
-  const payload = {
-    ...payment,
-    idempotency_key: idempotencyKey,
-  };
+//   const payload = {
+//     ...payment,
+//     idempotency_key: idempotencyKey,
+//   };
 
-  // =========================
-  // 1. SAVE LOCALLY FIRST
-  // =========================
-  const localId = await db.add("payments", {
-    ...payload,
-    status: "PENDING",
-    createdAt: new Date().toISOString(),
+//   // =========================
+//   // 1. SAVE LOCALLY FIRST
+//   // =========================
+//   const localId = await db.add("payments", {
+//     ...payload,
+//     status: "PENDING",
+//     createdAt: new Date().toISOString(),
+//   });
+
+//   // =========================
+//   // 2. ADD TO SYNC QUEUE
+//   // =========================
+//   await db.add("syncQueue", {
+//     type: "PAYMENT",
+//     payload: {
+//       ...payload,
+//       localId,
+//     },
+//     createdAt: new Date().toISOString(),
+//   });
+
+//   // =========================
+//   // 3. TRY IMMEDIATE SYNC
+//   // =========================
+//   try {
+//     const { data } = await API.post("/payments", payload);
+
+//     // Update local record → SYNCED
+//     await db.put("payments", {
+//       id: localId,
+//       ...data.payment,
+//       status: "SYNCED",
+//     });
+
+//     // Remove from sync queue if exists
+//     const queueItems = await db.getAll("syncQueue");
+//     const item = queueItems.find(
+//       (q) => q.payload.localId === localId
+//     );
+
+//     if (item) {
+//       await db.delete("syncQueue", item.id);
+//     }
+
+//     return {
+//       success: true,
+//       synced: true,
+//       payment: data.payment,
+//     };
+//   } catch (err) {
+//     console.log("📴 Offline mode — payment stored locally");
+
+//     return {
+//       success: true,
+//       synced: false,
+//       localId,
+//     };
+//   }
+// }
+
+// /**
+//  * Get all local payments (for UI)
+//  */
+// export async function getLocalPayments() {
+//   const db = await dbPromise;
+//   const payments = await db.getAll("payments");
+
+//   return payments.sort((a, b) => b.id - a.id);
+// }
+
+// /**
+//  * Delete local payment (rare use case)
+//  */
+// export async function deleteLocalPayment(id) {
+//   const db = await dbPromise;
+//   await db.delete("payments", id);
+// }
+
+
+
+const express = require("express");
+const router = express.Router();
+
+const pool = require("../db");
+const auth = require("../middleware/auth");
+
+// GET /api/payments/test
+router.get("/test", (req, res) => {
+  res.json({
+    ok: true,
+    message: "Payments route working",
   });
+});
 
-  // =========================
-  // 2. ADD TO SYNC QUEUE
-  // =========================
-  await db.add("syncQueue", {
-    type: "PAYMENT",
-    payload: {
-      ...payload,
-      localId,
-    },
-    createdAt: new Date().toISOString(),
-  });
-
-  // =========================
-  // 3. TRY IMMEDIATE SYNC
-  // =========================
+// POST /api/payments
+router.post("/", auth, async (req, res) => {
   try {
-    const { data } = await API.post("/payments", payload);
+    const { schoolId } = req.user;
 
-    // Update local record → SYNCED
-    await db.put("payments", {
-      id: localId,
-      ...data.payment,
-      status: "SYNCED",
-    });
+    const {
+      student_id,
+      amount,
+      payment_method = "Cash",
+      category = "Tuition",
+      term = "Term 1",
+      academic_year = "2026",
+      notes = "",
+    } = req.body;
 
-    // Remove from sync queue if exists
-    const queueItems = await db.getAll("syncQueue");
-    const item = queueItems.find(
-      (q) => q.payload.localId === localId
+    const receipt_number = `RCP-${Date.now()}-${Math.floor(
+      Math.random() * 1000
+    )}`;
+
+    const result = await pool.query(
+      `
+      INSERT INTO payments (
+        school_id,
+        student_id,
+        receipt_number,
+        amount,
+        payment_method,
+        category,
+        term,
+        academic_year,
+        notes,
+        recorded_by
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+      )
+      RETURNING *
+      `,
+      [
+        schoolId,
+        student_id,
+        receipt_number,
+        amount,
+        payment_method,
+        category,
+        term,
+        academic_year,
+        notes,
+        schoolId,
+      ]
     );
 
-    if (item) {
-      await db.delete("syncQueue", item.id);
-    }
-
-    return {
-      success: true,
-      synced: true,
-      payment: data.payment,
-    };
-  } catch (err) {
-    console.log("📴 Offline mode — payment stored locally");
-
-    return {
-      success: true,
-      synced: false,
-      localId,
-    };
+    res.status(201).json({
+      message: "Payment recorded successfully",
+      payment: result.rows[0],
+    });
+  } catch (error) {
+    console.error("PAYMENT ERROR:", error);
+    res.status(500).json({
+      error: "Failed to create payment",
+      details: error.message,
+    });
   }
-}
+});
 
-/**
- * Get all local payments (for UI)
- */
-export async function getLocalPayments() {
-  const db = await dbPromise;
-  const payments = await db.getAll("payments");
-
-  return payments.sort((a, b) => b.id - a.id);
-}
-
-/**
- * Delete local payment (rare use case)
- */
-export async function deleteLocalPayment(id) {
-  const db = await dbPromise;
-  await db.delete("payments", id);
-}
+module.exports = router;
