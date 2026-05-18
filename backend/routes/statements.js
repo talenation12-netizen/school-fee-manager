@@ -4,114 +4,83 @@ const router = express.Router();
 const pool = require("../db");
 const auth = require("../middleware/auth");
 
-// ========================================
-// STUDENT STATEMENT ENGINE v3 (BULLETPROOF)
-// ========================================
-// GET /api/statements/:studentId
+// =========================
+// STUDENT STATEMENT ENGINE v2 (FIXED)
+// =========================
 router.get("/:studentId", auth, async (req, res) => {
   try {
     const { studentId } = req.params;
     const { schoolId } = req.user;
 
-    // Validate student ID
-    if (!studentId || isNaN(Number(studentId))) {
-      return res.status(400).json({
-        error: "Invalid student ID",
-      });
-    }
-
-    // ========================================
+    // =========================
     // GET STUDENT
-    // ========================================
+    // =========================
     const studentResult = await pool.query(
       `
-      SELECT
-        id,
-        school_id,
-        full_name,
-        admission_number,
-        class_name,
-        COALESCE(expected_fees, fee_expected, 50000) AS expected_fees
-      FROM students
+      SELECT * FROM students
       WHERE id = $1 AND school_id = $2
       `,
-      [Number(studentId), schoolId]
+      [studentId, schoolId]
     );
 
-    if (studentResult.rows.length === 0) {
-      return res.status(404).json({
-        error: "Student not found",
-      });
+    if (!studentResult.rows.length) {
+      return res.status(404).json({ error: "Student not found" });
     }
 
     const student = studentResult.rows[0];
-    const expectedFees = Number(student.expected_fees || 0);
 
-    // ========================================
-    // GET PAYMENTS (SAFE EVEN IF TABLE EMPTY)
-    // ========================================
-    let payments = [];
-    try {
-      const paymentsResult = await pool.query(
-        `
-        SELECT
-          id,
-          amount,
-          receipt_number,
-          payment_method,
-          category,
-          term,
-          academic_year,
-          notes,
-          created_at
-        FROM payments
-        WHERE student_id = $1 AND school_id = $2
-        ORDER BY created_at ASC
-        `,
-        [Number(studentId), schoolId]
-      );
-
-      payments = paymentsResult.rows;
-    } catch (err) {
-      console.error("PAYMENTS QUERY ERROR:", err.message);
-      payments = [];
-    }
-
-    // ========================================
-    // GET LEDGER (OPTIONAL TABLE)
-    // ========================================
-    let ledger = [];
-    try {
-      const ledgerResult = await pool.query(
-        `
-        SELECT
-          id,
-          category,
-          amount,
-          description,
-          created_at
-        FROM student_ledger
-        WHERE student_id = $1 AND school_id = $2
-        ORDER BY created_at ASC
-        `,
-        [Number(studentId), schoolId]
-      );
-
-      ledger = ledgerResult.rows;
-    } catch (err) {
-      // Table may not exist yet — do not crash
-      console.warn("LEDGER QUERY WARNING:", err.message);
-      ledger = [];
-    }
-
-    // ========================================
-    // CALCULATIONS
-    // ========================================
-    const totalPaid = payments.reduce(
-      (sum, payment) => sum + Number(payment.amount || 0),
-      0
+    // =========================
+    // GET PAYMENTS
+    // =========================
+    const paymentsResult = await pool.query(
+      `
+      SELECT *
+      FROM payments
+      WHERE student_id = $1 AND school_id = $2
+      ORDER BY created_at ASC
+      `,
+      [studentId, schoolId]
     );
 
+    const payments = paymentsResult.rows || [];
+
+    // =========================
+    // GET LEDGER
+    // =========================
+    const ledgerResult = await pool.query(
+      `
+      SELECT *
+      FROM student_ledger
+      WHERE student_id = $1 AND school_id = $2
+      ORDER BY created_at ASC
+      `,
+      [studentId, schoolId]
+    );
+
+    const ledger = ledgerResult.rows || [];
+
+    // =========================
+    // SAFE FIELD MAPPING FIX
+    // =========================
+    const totalPaidResult = await pool.query(
+      `
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM payments
+      WHERE student_id = $1 AND school_id = $2
+      `,
+      [studentId, schoolId]
+    );
+
+    const totalPaid = Number(totalPaidResult.rows[0].total || 0);
+
+    // FIX: handle BOTH naming styles safely
+    const expectedFees = Number(
+      student.expected_fees ?? student.fee_expected ?? 0
+    );
+
+    // =========================
+    // FINANCIAL LOGIC
+    // =========================
     let balance = expectedFees - totalPaid;
     let credit = 0;
     let status = "OWING";
@@ -125,28 +94,26 @@ router.get("/:studentId", auth, async (req, res) => {
       status = "OVERPAID";
     }
 
-    // ========================================
-    // ANALYTICS
-    // ========================================
-    const paymentCount = payments.length;
-
+    // =========================
+    // SAFE REDUCE (NO CRASH)
+    // =========================
     const totalAllocated = ledger.reduce(
       (sum, item) => sum + Number(item.amount || 0),
       0
     );
 
     const breakdown = ledger.reduce((acc, item) => {
-      const category = item.category || "General";
-      acc[category] = (acc[category] || 0) + Number(item.amount || 0);
+      const key = item.category || "uncategorized";
+      acc[key] = (acc[key] || 0) + Number(item.amount || 0);
       return acc;
     }, {});
 
     const lastPayment =
       payments.length > 0 ? payments[payments.length - 1] : null;
 
-    // ========================================
+    // =========================
     // RESPONSE
-    // ========================================
+    // =========================
     res.json({
       student: {
         id: student.id,
@@ -166,16 +133,14 @@ router.get("/:studentId", auth, async (req, res) => {
       },
 
       analytics: {
-        paymentCount,
+        paymentCount: payments.length,
         totalAllocated,
         breakdown,
       },
 
       lastPayment,
-
-      // Both names included for frontend compatibility
       payments,
-      ledger: ledger.length > 0 ? ledger : payments,
+      ledger,
     });
   } catch (error) {
     console.error("STATEMENT ERROR:", error);
