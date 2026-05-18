@@ -204,4 +204,33 @@ router.get("/student-statement/:id", auth, async (req, res) => {
 });
 
 
+router.get("/reports/summary", async (req, res) => {
+  const schoolId = req.school.school_id;
+
+  const totalCollected = await pool.query(
+    "SELECT COALESCE(SUM(amount),0) FROM payments WHERE school_id=$1",
+    [schoolId]
+  );
+
+  const totalOutstanding = await pool.query(
+    "SELECT COALESCE(SUM(expected_fees - COALESCE(total_paid,0)),0) FROM students WHERE school_id=$1",
+    [schoolId]
+  );
+
+  const transactions = await pool.query(
+    "SELECT COUNT(*) FROM payments WHERE school_id=$1",
+    [schoolId]
+  );
+
+  res.json({
+    totalCollected: totalCollected.rows[0].sum,
+    totalOutstanding: totalOutstanding.rows[0].coalesce,
+    totalTransactions: transactions.rows[0].count,
+    activeStudents: 0,
+    classPerformance: [],
+    topDefaulters: [],
+  });
+});
+
+
 module.exports = router;
