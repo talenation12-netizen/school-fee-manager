@@ -4,79 +4,131 @@ const router = express.Router();
 const pool = require("../db");
 const auth = require("../middleware/auth");
 
-// =========================
-// STUDENT STATEMENT ENGINE v2 (PRODUCTION READY)
-// =========================
+// =============================================
+// STUDENT STATEMENT ENGINE v3 (BULLETPROOF)
+// Handles students even if:
+// - expected_fees is null
+// - no payments exist
+// - no ledger entries exist
+// - student_ledger table is empty
+// - some columns contain null values
+// =============================================
 router.get("/:studentId", auth, async (req, res) => {
   try {
     const { studentId } = req.params;
     const { schoolId } = req.user;
 
-    // =========================
+    // =============================================
+    // VALIDATE STUDENT ID
+    // =============================================
+    if (!studentId || isNaN(studentId)) {
+      return res.status(400).json({
+        error: "Invalid student ID",
+      });
+    }
+
+    // =============================================
     // GET STUDENT
-    // =========================
+    // =============================================
     const studentResult = await pool.query(
       `
-      SELECT * FROM students
-      WHERE id = $1 AND school_id = $2
+      SELECT
+        id,
+        school_id,
+        full_name,
+        admission_number,
+        class_name,
+        COALESCE(expected_fees, fee_expected, 0) AS expected_fees
+      FROM students
+      WHERE id = $1
+        AND school_id = $2
       `,
       [studentId, schoolId]
     );
 
     if (!studentResult.rows.length) {
-      return res.status(404).json({ error: "Student not found" });
+      return res.status(404).json({
+        error: "Student not found",
+      });
     }
 
     const student = studentResult.rows[0];
 
-    // =========================
-    // GET PAYMENTS (TIMELINE)
-    // =========================
+    // =============================================
+    // GET PAYMENTS
+    // =============================================
     const paymentsResult = await pool.query(
       `
-      SELECT *
+      SELECT
+        id,
+        amount,
+        receipt_number,
+        payment_method,
+        category,
+        term,
+        academic_year,
+        notes,
+        created_at
       FROM payments
-      WHERE student_id = $1 AND school_id = $2
+      WHERE student_id = $1
+        AND school_id = $2
       ORDER BY created_at ASC
       `,
       [studentId, schoolId]
     );
 
-    const payments = paymentsResult.rows;
+    const payments = paymentsResult.rows || [];
 
-    // =========================
-    // GET LEDGER (BREAKDOWN)
-    // =========================
-    const ledgerResult = await pool.query(
-      `
-      SELECT *
-      FROM student_ledger
-      WHERE student_id = $1 AND school_id = $2
-      ORDER BY created_at ASC
-      `,
-      [studentId, schoolId]
-    );
+    // =============================================
+    // GET LEDGER
+    // (Safe even if table is empty)
+    // =============================================
+    let ledger = [];
 
-    const ledger = ledgerResult.rows;
+    try {
+      const ledgerResult = await pool.query(
+        `
+        SELECT
+          id,
+          amount,
+          category,
+          description,
+          created_at
+        FROM student_ledger
+        WHERE student_id = $1
+          AND school_id = $2
+        ORDER BY created_at ASC
+        `,
+        [studentId, schoolId]
+      );
 
-    // =========================
-    // TOTAL PAID
-    // =========================
+      ledger = ledgerResult.rows || [];
+    } catch (ledgerError) {
+      // If student_ledger table has issues,
+      // do not fail the entire statement.
+      console.warn("LEDGER WARNING:", ledgerError.message);
+      ledger = [];
+    }
+
+    // =============================================
+    // CALCULATE TOTAL PAID
+    // =============================================
     const totalPaidResult = await pool.query(
       `
-      SELECT COALESCE(SUM(amount), 0) as total
+      SELECT COALESCE(SUM(amount), 0) AS total
       FROM payments
-      WHERE student_id = $1 AND school_id = $2
+      WHERE student_id = $1
+        AND school_id = $2
       `,
       [studentId, schoolId]
     );
 
-    const totalPaid = Number(totalPaidResult.rows[0].total);
-    const expectedFees = Number(student.expected_fees);
+    const totalPaid = Number(totalPaidResult.rows[0]?.total || 0);
+    const expectedFees = Number(student.expected_fees || 0);
 
-    // =========================
+    // =============================================
     // CORE FINANCIAL LOGIC
-    // =========================
+    // =============================================
     let balance = expectedFees - totalPaid;
     let credit = 0;
     let status = "OWING";
@@ -90,10 +142,9 @@ router.get("/:studentId", auth, async (req, res) => {
       status = "OVERPAID";
     }
 
-    // =========================
-    // OPTIONAL ENRICHMENTS (FOR PDF / UI)
-    // =========================
-
+    // =============================================
+    // ANALYTICS
+    // =============================================
     const lastPayment =
       payments.length > 0 ? payments[payments.length - 1] : null;
 
@@ -104,19 +155,16 @@ router.get("/:studentId", auth, async (req, res) => {
       0
     );
 
-    // Category breakdown (useful for analytics)
-    const breakdown = ledger.reduce(
-      (acc, item) => {
-        acc[item.category] =
-          (acc[item.category] || 0) + Number(item.amount);
-        return acc;
-      },
-      {}
-    );
+    const breakdown = ledger.reduce((acc, item) => {
+      const category = item.category || "General";
+      acc[category] =
+        (acc[category] || 0) + Number(item.amount || 0);
+      return acc;
+    }, {});
 
-    // =========================
-    // RESPONSE (CLEAN + PDF READY)
-    // =========================
+    // =============================================
+    // RESPONSE
+    // =============================================
     res.json({
       student: {
         id: student.id,
