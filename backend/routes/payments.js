@@ -16,7 +16,35 @@ router.get("/test", (req, res) => {
 });
 
 // =========================
-// CREATE PAYMENT (SPRINT 15 FINAL)
+// GET ALL PAYMENTS (FIX FOR FRONTEND)
+// =========================
+router.get("/", auth, async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM payments
+      WHERE school_id = $1
+      ORDER BY created_at DESC
+      `,
+      [schoolId]
+    );
+
+    res.json(result.rows || []);
+  } catch (error) {
+    console.error("GET PAYMENTS ERROR:", error);
+
+    res.status(500).json({
+      error: "Failed to fetch payments",
+      details: error.message,
+    });
+  }
+});
+
+// =========================
+// CREATE PAYMENT
 // =========================
 router.post("/", auth, async (req, res) => {
   try {
@@ -68,7 +96,7 @@ router.post("/", auth, async (req, res) => {
     const allocation = allocatePayment(amount);
 
     // =========================
-    // BALANCE CALCULATION
+    // TOTAL PAID CALCULATION
     // =========================
     const totalPaidResult = await pool.query(
       `
@@ -85,19 +113,10 @@ router.post("/", auth, async (req, res) => {
     const expectedFees = Number(student.expected_fees);
 
     let balanceAfter = expectedFees - newPaid;
-
-    // =========================
-    // CREDIT LOGIC (OPTION 2 - COMPUTED ONLY)
-    // =========================
     let credit = newPaid - expectedFees;
 
-    if (credit < 0) {
-      credit = 0;
-    }
-
-    if (balanceAfter < 0) {
-      balanceAfter = 0;
-    }
+    if (credit < 0) credit = 0;
+    if (balanceAfter < 0) balanceAfter = 0;
 
     // =========================
     // RECEIPT NUMBER
@@ -208,6 +227,3 @@ router.post("/", auth, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
