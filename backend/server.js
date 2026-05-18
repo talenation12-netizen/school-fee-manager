@@ -22,6 +22,8 @@ const pdfRoutes = require("./routes/pdf");
 const ledgerRoutes = require("./routes/ledger");
 const statementRoutes = require("./routes/statements");
 const settingsRoutes = require("./routes/settings.routes");
+const reportsRoutes = require("./routes/reports.routes");
+const studentsRoutes = require("./routes/students.routes");
 
 // AUTH MIDDLEWARE
 const auth = require("./middleware/auth");
@@ -43,6 +45,8 @@ app.use("/api/pdf", auth, pdfRoutes);
 app.use("/api/ledger", auth, ledgerRoutes);
 app.use("/api/statements", auth, statementRoutes);
 app.use("/api/settings", auth, settingsRoutes);
+app.use("/api/reports", auth, reportsRoutes);
+app.use("/api/students", auth, studentsRoutes);
 
 // =====================
 // HEALTH CHECK

@@ -1,32 +1,17 @@
-// const express = require("express");
-// const router = express.Router();
-// const pool = require("../db");
-
-// // GET ALL STUDENTS
-// router.get("/", async (req, res) => {
-//   try {
-//     const schoolId = req.user?.school_id || "test_school";
-
-//     const result = await pool.query(
-//       "SELECT * FROM students WHERE school_id = $1 ORDER BY id DESC",
-//       [schoolId]
-//     );
-
-//     res.json(result.rows || []);
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json([]);
-//   }
-// });
-
-// module.exports = router;
-
-
 const express = require("express");
 const router = express.Router();
 
+// GET /api/students
 router.get("/", async (req, res) => {
-  res.json([]);
+  res.json([
+    {
+      id: 1,
+      admission_number: "ADM001",
+      full_name: "John Doe",
+      class_name: "Grade 5",
+      balance: 0
+    }
+  ]);
 });
 
 module.exports = router;
